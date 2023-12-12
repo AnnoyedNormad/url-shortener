@@ -8,18 +8,18 @@ import (
 )
 
 type Config struct {
-	Env         string     `yaml:"env" env-default:"local"`
-	StoragePath string     `yaml:"storage-path" env-required:"true"`
-	Server      HTTPServer `yaml:"http_server"`
+	Env         string `yaml:"env" env-default:"development"`
+	StoragePath string `yaml:"storage_path" env-required:"true"`
+	HTTPServer  `yaml:"http_server"`
 }
 
 type HTTPServer struct {
-	Address     string        `yaml:"address" env-default:"localhost:8080"`
-	Timeout     time.Duration `yaml:"timeout" env-default:"4s"`
+	Address     string        `yaml:"address" env-default:"0.0.0.0:8080"`
+	Timeout     time.Duration `yaml:"timeout" env-default:"5s"`
 	IdleTimeout time.Duration `yaml:"idle_timeout" env-default:"60s"`
 }
 
-func MustLoad() Config {
+func MustLoad() *Config {
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		log.Fatalf("CONFIG_PATH is not set")
@@ -35,5 +35,5 @@ func MustLoad() Config {
 		log.Fatalf("cannot read config: %s", configPath)
 	}
 
-	return cfg
+	return &cfg
 }
