@@ -23,6 +23,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	_ = storage
+
 	// TODO: init router: chi, render
 
 	// TODO: run server
