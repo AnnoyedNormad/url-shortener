@@ -23,7 +23,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	_ = storage
+	err = storage.SaveURL("https://www.ratatype.ru/", "ratatype")
+	if err != nil {
+		log.Error("failed to save url", sl.Err(err))
+		os.Exit(1)
+	}
 
 	// TODO: init router: chi, render
 
