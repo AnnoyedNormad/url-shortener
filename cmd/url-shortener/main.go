@@ -1,10 +1,17 @@
 package main
 
 import (
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"log/slog"
+	"net/http"
 	"os"
 	"url-shortener/constants"
 	"url-shortener/internal/config"
+	"url-shortener/internal/http-server/handlers/url/delete"
+	"url-shortener/internal/http-server/handlers/url/redirect"
+	"url-shortener/internal/http-server/handlers/url/save"
+	"url-shortener/internal/http-server/mwLogger"
 	"url-shortener/internal/lib/logger/sl"
 	"url-shortener/internal/storage/sqlite"
 )
@@ -23,15 +30,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = storage.SaveURL("https://www.ratatype.ru/", "ratatype")
-	if err != nil {
-		log.Error("failed to save url", sl.Err(err))
-		os.Exit(1)
+	router := chi.NewRouter()
+
+	router.Use(middleware.RequestID)
+	router.Use(mwLogger.New(log))
+	router.Use(middleware.Recoverer)
+	router.Use(middleware.URLFormat)
+
+	router.Post("/url", save.New(log, storage))
+	router.Get("/url/{alias}", redirect.New(log, storage))
+	router.Delete("/url/{alias}", delete.New(log, storage))
+
+	server := &http.Server{
+		Addr:         cfg.Address,
+		Handler:      router,
+		ReadTimeout:  cfg.Timeout,
+		WriteTimeout: cfg.Timeout,
+		IdleTimeout:  cfg.IdleTimeout,
 	}
 
-	// TODO: init router: chi, render
-
-	// TODO: run server
+	log.Info("starting server", slog.String("address", cfg.Address))
+	err = server.ListenAndServe()
+	if err != nil {
+		log.Error("failed to run server", sl.Err(err))
+		os.Exit(1)
+	}
 }
 
 func setupLogger(env string) *slog.Logger {

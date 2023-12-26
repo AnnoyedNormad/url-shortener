@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/mattn/go-sqlite3"
 	_ "github.com/mattn/go-sqlite3"
@@ -54,4 +55,63 @@ func (s *Storage) SaveURL(url string, alias string) error {
 	}
 
 	return nil
+}
+
+func (s *Storage) GetURL(alias string) (string, error) {
+	const op = "storage.sqlite.GetUrl"
+
+	row := s.db.QueryRow("SELECT url FROM URL WHERE alias = ?", alias)
+
+	var url string
+	err := row.Scan(&url)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("%s: %w", op, storage.ErrURLNotFound)
+		}
+		return "", fmt.Errorf("%s: %w", op, err)
+	}
+
+	return url, nil
+}
+
+func (s *Storage) DeleteURL(alias string) error {
+	const op = "storage.sqlite.DeleteUrl"
+
+	stmt, err := s.db.Prepare("DELETE FROM URL WHERE alias = ?")
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	res, err := stmt.Exec(alias)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	deletedRows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	if deletedRows == 0 {
+		return fmt.Errorf("%s: %w", op, storage.ErrURLNotFound)
+	}
+
+	return nil
+}
+
+func (s *Storage) URLIsExist(alias string) (bool, error) {
+	const op = "storage.sqlite.IsExist"
+
+	row := s.db.QueryRow("SELECT url FROM URL WHERE alias = ?", alias)
+
+	var url string
+	err := row.Scan(&url)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, nil
+		}
+		return false, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return true, fmt.Errorf("%s: %w", op, storage.ErrURLExists)
 }
