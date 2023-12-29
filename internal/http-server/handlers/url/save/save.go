@@ -8,14 +8,12 @@ import (
 	"github.com/go-playground/validator/v10"
 	"log/slog"
 	"net/http"
+	"url-shortener/internal/config"
 	"url-shortener/internal/lib/api/response"
 	"url-shortener/internal/lib/logger/sl"
 	"url-shortener/internal/lib/random"
 	"url-shortener/internal/storage"
 )
-
-// TODO: load alias length from config
-const aliasLength = 7
 
 type Request struct {
 	URL   string `json:"url" validate:"required,url"`
@@ -28,11 +26,11 @@ type Response struct {
 }
 
 type URLSaver interface {
-	SaveURL(url string, alias string) error
-	URLIsExist(alias string) (bool, error)
+	SaveURL(username, url, alias string) error
+	AliasIsExist(alias string) (bool, error)
 }
 
-func New(log *slog.Logger, urlSaver URLSaver) http.HandlerFunc {
+func New(log *slog.Logger, urlSaver URLSaver, cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const op = "handlers.url.save.New"
 
@@ -64,33 +62,34 @@ func New(log *slog.Logger, urlSaver URLSaver) http.HandlerFunc {
 
 		alias := req.Alias
 		if alias == "" {
-			alias, err = generateRandomString(urlSaver)
+			alias, err = generateRandomString(urlSaver, cfg)
 			if err != nil {
 				log.Error("can't generate random string", sl.Err(err))
 
-				render.JSON(w, r, response.Error("can't generate random string"))
+				render.JSON(w, r, response.Error("internal error"))
 
 				return
 			}
 		}
 
-		err = urlSaver.SaveURL(req.URL, alias)
+		user, _, _ := r.BasicAuth()
+		err = urlSaver.SaveURL(user, req.URL, alias)
 		if errors.Is(err, storage.ErrURLExists) {
-			log.Info("url already exists", slog.String("url", req.URL))
+			log.Info("url already exists", slog.String("url", req.URL), slog.String("err", err.Error()))
 
 			render.JSON(w, r, response.Error("url already exists"))
 
 			return
 		}
 		if err != nil {
-			log.Error("failed to add url", slog.String("url", req.URL))
+			log.Error("failed to add url", slog.String("url", req.URL), slog.String("err", err.Error()))
 
 			render.JSON(w, r, response.Error("failed to add url"))
 
 			return
 		}
 
-		log.Info("url added")
+		log.Info("url added", slog.String("user", user))
 
 		render.JSON(w, r, Response{
 			Response: response.OK(),
@@ -99,17 +98,23 @@ func New(log *slog.Logger, urlSaver URLSaver) http.HandlerFunc {
 	}
 }
 
-func generateRandomString(urlSaver URLSaver) (string, error) {
+func generateRandomString(urlSaver URLSaver, cfg *config.Config) (string, error) {
 	op := "generateRandomString"
-	var alias = random.NewRandomString(aliasLength)
 
-	isExist, err := urlSaver.URLIsExist(alias)
-	for !isExist {
-		if err != nil {
+	var alias = random.NewRandomString(cfg.AliasGenerator.Length, cfg.AliasGenerator.Alphabet)
+	isExist, err := urlSaver.AliasIsExist(alias)
+	var counter int
+	for isExist {
+		if counter == cfg.AliasGenerator.GenLimit {
+			return "", fmt.Errorf("%s: %w", op, random.ErrAliasesAreOver)
+		}
+		if !errors.Is(err, storage.ErrURLExists) {
 			return "", fmt.Errorf("%s: %w", op, err)
 		}
 
-		isExist, err = urlSaver.URLIsExist(alias)
+		alias = random.NewRandomString(cfg.AliasGenerator.Length, cfg.AliasGenerator.Alphabet)
+		isExist, err = urlSaver.AliasIsExist(alias)
+		counter++
 	}
 
 	return alias, nil
