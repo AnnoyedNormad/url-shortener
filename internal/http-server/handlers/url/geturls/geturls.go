@@ -1,8 +1,6 @@
-package delete
+package save
 
 import (
-	"errors"
-	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
 	"log/slog"
@@ -19,49 +17,36 @@ type Request struct {
 
 type Response struct {
 	response.Response
+	URLS []storage.AliasUrl `json:"urls,omitempty"`
 }
 
-type URLDeleter interface {
-	DeleteURL(alias string) error
+type AliasURLGetter interface {
+	GetUserAliasURL(user string) ([]storage.AliasUrl, error)
 }
 
-func New(log *slog.Logger, urlDeleter URLDeleter) http.HandlerFunc {
+func New(log *slog.Logger, aliasURLGetter AliasURLGetter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		const op = "handlers.url.delete.New"
+		const op = "handlers.url.geturls.New"
 
 		log = log.With(
 			slog.String("op", op),
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 		)
 
-		alias := chi.URLParam(r, "alias")
-		if alias == "" {
-			log.Info("alias is empty")
-
-			render.JSON(w, r, response.Error("invalid request"))
-
-			return
-		}
-
-		err := urlDeleter.DeleteURL(alias)
-		if errors.Is(err, storage.ErrURLNotFound) {
-			log.Info("url not found", sl.Err(err))
-
-			render.JSON(w, r, response.Error("not found"))
-
-			return
-		}
+		user, _, _ := r.BasicAuth()
+		urls, err := aliasURLGetter.GetUserAliasURL(user)
 		if err != nil {
-			log.Info("failed to delete url", sl.Err(err))
+			log.Info("failed to get url", sl.Err(err))
 
 			render.JSON(w, r, response.Error("internal error"))
 
 			return
 		}
-		log.Info("url deleted", slog.String("alias", alias))
+		log.Info("got urls")
 
 		render.JSON(w, r, Response{
 			Response: response.OK(),
+			URLS:     urls,
 		})
 	}
 }

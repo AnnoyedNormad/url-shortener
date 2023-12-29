@@ -8,7 +8,8 @@ import (
 	"os"
 	"url-shortener/constants"
 	"url-shortener/internal/config"
-	"url-shortener/internal/http-server/handlers/url/delete"
+	delete "url-shortener/internal/http-server/handlers/url/delete"
+	geturls "url-shortener/internal/http-server/handlers/url/geturls"
 	"url-shortener/internal/http-server/handlers/url/redirect"
 	"url-shortener/internal/http-server/handlers/url/save"
 	"url-shortener/internal/http-server/mwLogger"
@@ -33,13 +34,22 @@ func main() {
 	router := chi.NewRouter()
 
 	router.Use(middleware.RequestID)
+	router.Use(middleware.Logger)
 	router.Use(mwLogger.New(log))
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.URLFormat)
 
-	router.Post("/url", save.New(log, storage))
-	router.Get("/url/{alias}", redirect.New(log, storage))
-	router.Delete("/url/{alias}", delete.New(log, storage))
+	router.Route("/url", func(r chi.Router) {
+		r.Use(middleware.BasicAuth("url-shortener", map[string]string{
+			cfg.Login: cfg.Password,
+		}))
+
+		r.Get("/", geturls.New(log, storage))
+		r.Post("/", save.New(log, storage, cfg))
+		r.Delete("/{alias}", delete.New(log, storage))
+	})
+
+	router.Get("/{alias}", redirect.New(log, storage))
 
 	server := &http.Server{
 		Addr:         cfg.Address,
@@ -55,6 +65,7 @@ func main() {
 		log.Error("failed to run server", sl.Err(err))
 		os.Exit(1)
 	}
+
 }
 
 func setupLogger(env string) *slog.Logger {
@@ -64,7 +75,9 @@ func setupLogger(env string) *slog.Logger {
 	case constants.EnvLocal:
 		log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	case constants.EnvDev:
-		log = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		log = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	default:
+		log = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	}
 
 	return log

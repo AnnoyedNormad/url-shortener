@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/mattn/go-sqlite3"
 	_ "github.com/mattn/go-sqlite3"
 	"url-shortener/internal/storage"
 )
@@ -24,6 +23,7 @@ func New(storagePath string) (*Storage, error) {
 	stmt, err := db.Prepare(`
 	CREATE TABLE IF NOT EXISTS URL (
 		id INTEGER PRIMARY KEY,
+		user TEXT NOT NULL,
 		alias TEXT NOT NULL UNIQUE,
 		url TEXT NOT NULL);
 	CREATE INDEX IF NOT EXISTS idx_alias ON url(alias);
@@ -37,20 +37,25 @@ func New(storagePath string) (*Storage, error) {
 	return &Storage{db: db}, nil
 }
 
-func (s *Storage) SaveURL(url string, alias string) error {
+func (s *Storage) SaveURL(user, url, alias string) error {
 	const op = "storage.sqlite.SaveURL"
 
-	stmt, err := s.db.Prepare("INSERT INTO url(url, alias) VALUES(?, ?)")
+	URLIsExist, err := s.UsersURLIsExist(user, url)
 	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	_, err = stmt.Exec(url, alias)
-	if err != nil {
-		if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
-			return fmt.Errorf("%s: %w", op, storage.ErrURLExists)
-		}
+	if URLIsExist {
+		return fmt.Errorf("%s: %w", op, storage.ErrURLExists)
+	}
 
+	stmt, err := s.db.Prepare("INSERT INTO url(user, url, alias) VALUES(?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	_, err = stmt.Exec(user, url, alias)
+	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
@@ -99,8 +104,8 @@ func (s *Storage) DeleteURL(alias string) error {
 	return nil
 }
 
-func (s *Storage) URLIsExist(alias string) (bool, error) {
-	const op = "storage.sqlite.IsExist"
+func (s *Storage) AliasIsExist(alias string) (bool, error) {
+	const op = "storage.sqlite.AliasIsExist"
 
 	row := s.db.QueryRow("SELECT url FROM URL WHERE alias = ?", alias)
 
@@ -108,10 +113,50 @@ func (s *Storage) URLIsExist(alias string) (bool, error) {
 	err := row.Scan(&url)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return true, nil
+			return false, nil
+		}
+		return false, fmt.Errorf("%s: %w", op, err)
+	}
+
+	return true, fmt.Errorf("%s: %w", op, storage.ErrAliasExists)
+}
+
+func (s *Storage) UsersURLIsExist(user, URL string) (bool, error) {
+	const op = "storage.sqlite.URLIsExist"
+
+	row := s.db.QueryRow("SELECT id FROM URL WHERE user = ? AND url = ?", user, URL)
+
+	var url string
+	err := row.Scan(&url)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
 		}
 		return false, fmt.Errorf("%s: %w", op, err)
 	}
 
 	return true, fmt.Errorf("%s: %w", op, storage.ErrURLExists)
+}
+
+func (s *Storage) GetUserAliasURL(user string) ([]storage.AliasUrl, error) {
+	const op = "storage.sqlite.GetUserAliasUrl"
+
+	rows, err := s.db.Query("SELECT alias, url FROM URL WHERE user = ?", user)
+	if err != nil {
+		return nil, nil
+	}
+
+	var result []storage.AliasUrl
+	var alias, url string
+
+	for rows.Next() {
+		err = rows.Scan(&alias, &url)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", op, err)
+		}
+
+		result = append(result, storage.AliasUrl{Alias: alias, URL: url})
+	}
+
+	return result, nil
 }
